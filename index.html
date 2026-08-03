@@ -1,1 +1,125 @@
-<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mini</title><link rel="stylesheet" href="style.css"></head><body><div class="container"><header><h1>MiniVault Pro</h1><p>Gestor</p></header><div id="authCard" class="card"><h2>Desbloquear Vault</h2><p style="font-size:.85rem;color:#666">Ingresa tu contraseña maestra para descifrar tus datos locales o remotos.</p><div class="form-group"><label for="masterPassword">Contraseña Maestra</label> <input type="password" id="masterPassword" placeholder="••••••••"></div><div class="sync-config"><label for="storageProviderSelect">Proveedor de Almacenamiento (IStorageService):</label> <select id="storageProviderSelect" onchange="toggleStorageConfig()"><option value="local">LocalStorage (Navegador)</option><option value="github">GitHub JSON Gist / Repo (Remoto)</option></select><div id="githubConfigSection" class="hidden" style="margin-top:10px"><div class="form-group"><label for="ghToken">GitHub Personal Access Token (PAT)</label> <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxx"></div><div class="form-group"><label for="ghRepo">Repositorio (ej. usuario/repo o Gist ID)</label> <input type="text" id="ghRepo" placeholder="tu-usuario/passwords-db"></div><div class="form-group"><label for="ghPath">Ruta del archivo JSON</label> <input type="text" id="ghPath" value="vault.json"></div></div></div><button type="button" onclick="unlockVault()">Desbloquear Vault</button></div><div id="mainPanel" class="hidden"><div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:12px 20px"><div><span class="status-badge" id="storageStatusBadge">Almacenamiento: Local</span> <span class="status-badge" id="lockTimerBadge" style="background:#dbeafe;color:#1e40af">Inactividad: 5:00</span></div><div style="display:flex;gap:10px"><button class="btn-secondary" onclick="syncStorage()" style="padding:6px 12px;font-size:.85rem">Sincronizar</button> <button class="btn-danger" onclick="lockVault()" style="padding:6px 12px;font-size:.85rem">Bloquear</button></div></div><div class="card"><h2>Generador de Contraseñas Seguras</h2><div class="form-group row"><input type="text" id="generatedPassword" readonly="readonly" placeholder="Genera una contraseña..."> <button type="button" onclick="generatePassword()" style="width:140px">Generar</button></div></div><div class="card"><h2 id="formTitle">Guardar Nueva Credencial</h2><form id="vaultForm"><input type="hidden" id="editIndex" value="-1"><div class="form-group"><label for="site">Sitio Web / Aplicación</label> <input type="text" id="site" required placeholder="ej. github.com"></div><div class="form-group"><label for="username">Usuario / Correo</label> <input type="text" id="username" required placeholder="ej. usuario@email.com"></div><div class="form-group"><label for="password">Contraseña</label><div class="row"><input type="password" id="password" required placeholder="••••••••"> <button type="button" class="btn-secondary" onclick="togglePass()" style="width:100px">Ver</button></div></div><div class="row"><button type="submit" id="submitBtn">Guardar Credencial</button> <button type="button" id="cancelEditBtn" class="btn-secondary hidden" onclick="resetForm()">Cancelar</button></div></form></div><div class="card"><h2><span>Cuentas Guardadas</span> <input type="text" id="searchInput" placeholder="Buscar por sitio o usuario..." oninput="filterVault()" style="width:250px;font-size:.9rem;padding:6px 10px"></h2><div id="vaultList"><p style="color:#777;text-align:center">No hay contraseñas guardadas.</p></div></div></div></div><script src="script.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniVault Pro</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>MiniVault Pro</h1>
+            <p>Gestor de Contraseñas Seguro</p>
+        </header>
+
+        <!-- Tarjeta de Autenticación -->
+        <div id="authCard" class="card">
+            <h2>Desbloquear Vault</h2>
+            <p style="font-size: 0.85rem; color: #666;">Ingresa tu contraseña maestra para descifrar tus datos.</p>
+
+            <div class="form-group">
+                <label for="masterPassword">Contraseña Maestra</label>
+                <input type="password" id="masterPassword" placeholder="••••••••">
+            </div>
+
+            <div class="sync-config">
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label for="storageProviderSelect">Proveedor de Almacenamiento:</label>
+                    <select id="storageProviderSelect" onchange="toggleStorageConfig()">
+                        <option value="local">LocalStorage (Navegador)</option>
+                        <option value="github">GitHub JSON Repo (Remoto)</option>
+                    </select>
+                </div>
+
+                <div id="githubConfigSection" class="hidden">
+                    <div class="form-group">
+                        <label for="ghToken">GitHub Personal Access Token (PAT)</label>
+                        <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="ghRepo">Repositorio (ej. usuario/repo)</label>
+                        <input type="text" id="ghRepo" placeholder="tu-usuario/passwords-db">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="ghPath">Ruta del archivo JSON</label>
+                        <input type="text" id="ghPath" value="vault.json">
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" onclick="unlockVault()" style="width: 100%;">Desbloquear Vault</button>
+        </div>
+
+        <!-- Panel Principal -->
+        <div id="mainPanel" class="hidden">
+            <div class="card"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;">
+                <div>
+                    <span class="status-badge" id="storageStatusBadge">Almacenamiento: Local</span>
+                    <span class="status-badge" id="lockTimerBadge"
+                        style="background: #dbeafe; color: #1e40af;">Inactividad: 5:00</span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn-secondary" onclick="syncStorage()"
+                        style="padding: 6px 12px; font-size: 0.85rem;">Sincronizar</button>
+                    <button class="btn-danger" onclick="lockVault()"
+                        style="padding: 6px 12px; font-size: 0.85rem;">Bloquear</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Generador de Contraseñas Seguras</h2>
+                <div class="form-group row">
+                    <input type="text" id="generatedPassword" readonly placeholder="Genera una contraseña...">
+                    <button type="button" onclick="generatePassword()" style="width: 140px;">Generar</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 id="formTitle">Guardar Nueva Credencial</h2>
+                <form id="vaultForm">
+                    <input type="hidden" id="editIndex" value="-1">
+                    <div class="form-group">
+                        <label for="site">Sitio Web / Aplicación</label>
+                        <input type="text" id="site" required placeholder="ej. github.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="username">Usuario / Correo</label>
+                        <input type="text" id="username" required placeholder="ej. usuario@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Contraseña</label>
+                        <div class="row">
+                            <input type="password" id="password" required placeholder="••••••••">
+                            <button type="button" class="btn-secondary" onclick="togglePass()"
+                                style="width: 100px;">Ver</button>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <button type="submit" id="submitBtn">Guardar Credencial</button>
+                        <button type="button" id="cancelEditBtn" class="btn-secondary hidden"
+                            onclick="resetForm()">Cancelar</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <h2>
+                    <span>Cuentas Guardadas</span>
+                    <input type="text" id="searchInput" placeholder="Buscar por sitio o usuario..."
+                        oninput="filterVault()" style="width: 250px; font-size: 0.9rem; padding: 6px 10px;">
+                </h2>
+                <div id="vaultList">
+                    <p style="color: #777; text-align: center;">No hay contraseñas guardadas.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

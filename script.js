@@ -1,11 +1,6 @@
 // ==========================================
-// 1. CAPA DE ABSTRACCIÓN DE ALMACENAMIENTO (SOLID: D - Dependency Inversion)
+// 1. CAPA DE ALMACENAMIENTO (SOLID: D)
 // ==========================================
-
-// Interfaz conceptual IStorageService:
-// loadData() -> Promise<string>
-// saveData(dataString) -> Promise<void>
-
 class LocalStorageProvider {
     async loadData() {
         return localStorage.getItem('my_secure_vault_payload') || '[]';
@@ -19,7 +14,7 @@ class LocalStorageProvider {
 class GitHubJsonStorageProvider {
     constructor(token, repo, path) {
         this.token = token;
-        this.repo = repo; // formato "usuario/repo"
+        this.repo = repo;
         this.path = path || "vault.json";
     }
 
@@ -28,19 +23,15 @@ class GitHubJsonStorageProvider {
         const response = await fetch(url, {
             headers: { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
         });
-        if (response.status === 404) return '[]'; // Si no existe aún
+        if (response.status === 404) return '[]';
         if (!response.ok) throw new Error("Error al conectar con GitHub API");
 
         const data = await response.json();
-        // GitHub devuelve el contenido en base64
-        const jsonString = decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
-        return jsonString;
+        return decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
     }
 
     async saveData(dataString) {
         const url = `https://api.github.com/repos/${this.repo}/contents/${this.path}`;
-
-        // 1. Necesitamos obtener el SHA actual del archivo si existe (requisito de GitHub API para actualizar)
         let sha = null;
         try {
             const checkRes = await fetch(url, {
@@ -52,11 +43,9 @@ class GitHubJsonStorageProvider {
             }
         } catch (e) { /* Archivo nuevo */ }
 
-        // 2. Codificar contenido en base64 UTF-8 seguro
         const encodedContent = btoa(unescape(encodeURIComponent(dataString)));
-
         const body = {
-            message: "Update password vault encrypted payload via MiniVault Pro",
+            message: "Update password vault payload via MiniVault Pro",
             content: encodedContent
         };
         if (sha) body.sha = sha;
@@ -80,14 +69,17 @@ class GitHubJsonStorageProvider {
 }
 
 // ==========================================
-// 2. ESTADO GLOBAL Y CRIPTOGRAFÍA AES-256
+// 2. ESTADO GLOBAL Y CRIPTOGRAFÍA
 // ==========================================
-let storageService = null; // Inyección de dependencia
+let storageService = null;
 let cryptoKey = null;
 let salt = null;
 let vaultCache = [];
 let idleTimer = null;
-const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos de inactividad
+const IDLE_LIMIT_MS = 5 * 60 * 1000;
+
+const VERIFICATION_SENTINEL_SITE = "minivault_verification_sentinel_key";
+const VERIFICATION_PLAINTEXT = "VALID_MASTER_PASSWORD";
 
 function str2ab(str) { return new TextEncoder().encode(str); }
 function ab2str(buffer) { return new TextDecoder().decode(buffer); }
@@ -121,7 +113,6 @@ async function unlockVault() {
         return;
     }
 
-    // Seleccionar proveedor según la elección (Principio D / Inyección)
     const providerType = document.getElementById('storageProviderSelect').value;
     if (providerType === 'github') {
         const token = document.getElementById('ghToken').value;
@@ -137,7 +128,6 @@ async function unlockVault() {
     }
 
     try {
-        // Gestionar Salt de forma segura (para LocalStorage o guardada localmente)
         let storedSaltKey = 'vault_salt_' + providerType;
         let storedSalt = localStorage.getItem(storedSaltKey);
 
@@ -148,7 +138,6 @@ async function unlockVault() {
             salt = new Uint8Array(b642ab(storedSalt));
         }
 
-        // Derivar clave criptográfica con PBKDF2 (100,000 iteraciones)
         const baseKey = await window.crypto.subtle.importKey(
             "raw", str2ab(masterPass), { name: "PBKDF2" }, false, ["deriveKey"]
         );
@@ -161,7 +150,35 @@ async function unlockVault() {
             ["encrypt", "decrypt"]
         );
 
-        // Intentar cargar y verificar descifrado
+        // Cargar y validar testigo
+        const rawPayload = await storageService.loadData();
+        let encryptedVault = JSON.parse(rawPayload) || [];
+        let sentinelIndex = encryptedVault.findIndex(i => i.isSentinel === true);
+
+        if (sentinelIndex === -1) {
+            const encSentinelSite = await encryptData(VERIFICATION_SENTINEL_SITE);
+            const encSentinelUser = await encryptData("system");
+            const encSentinelPass = await encryptData(VERIFICATION_PLAINTEXT);
+
+            encryptedVault.push({
+                id: 'sentinel_' + Date.now(),
+                isSentinel: true,
+                site: encSentinelSite,
+                username: encSentinelUser,
+                password: encSentinelPass
+            });
+            await storageService.saveData(JSON.stringify(encryptedVault));
+        } else {
+            const sentinelItem = encryptedVault[sentinelIndex];
+            const decryptedPass = await decryptData(sentinelItem.password);
+
+            if (decryptedPass !== VERIFICATION_PLAINTEXT) {
+                cryptoKey = null;
+                alert("Contraseña maestra incorrecta.");
+                return;
+            }
+        }
+
         document.getElementById('authCard').classList.add('hidden');
         document.getElementById('mainPanel').classList.remove('hidden');
         document.getElementById('storageStatusBadge').innerText = "Almacenamiento: " + storageService.getName();
@@ -169,10 +186,8 @@ async function unlockVault() {
         await loadVault();
         initIdleTimer();
     } catch (e) {
-        alert("Error al desbloquear el vault o conectar con el proveedor: " + e.message);
-        console.error(e);
-        document.getElementById('authCard').classList.remove('hidden');
-        document.getElementById('mainPanel').classList.add('hidden');
+        alert("Error al desbloquear o conectar: " + e.message);
+        cryptoKey = null;
     }
 }
 
@@ -200,7 +215,6 @@ async function decryptData(encryptedObj) {
 // ==========================================
 // 3. GESTIÓN DE CREDENCIALES (CRUD)
 // ==========================================
-
 async function loadVault() {
     const vaultList = document.getElementById('vaultList');
     vaultList.innerHTML = '<p style="color: #777; text-align: center;">Cargando y descifrando vault...</p>';
@@ -211,6 +225,8 @@ async function loadVault() {
 
         vaultCache = [];
         for (const item of encryptedVault) {
+            if (item.isSentinel) continue;
+
             const decSite = await decryptData(item.site);
             const decUser = await decryptData(item.username);
             const decPass = await decryptData(item.password);
@@ -237,24 +253,23 @@ function renderVaultList(items) {
     let html = '';
     items.forEach((item, index) => {
         html += `
-                    <div class="vault-item">
-                        <div class="item-info">
-                            <strong>${escapeHtml(item.site)}</strong>
-                            <div>Usuario: ${escapeHtml(item.username)}</div>
-                            <div>Contraseña: <span class="password-display">${escapeHtml(item.password)}</span></div>
-                        </div>
-                        <div class="actions">
-                            <button class="btn-success" onclick="copyToClipboard('${escapeQuotes(item.password)}')" style="padding: 6px 10px; font-size: 0.8rem;">Copiar</button>
-                            <button class="btn-secondary" onclick="editItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Editar</button>
-                            <button class="btn-danger" onclick="deleteItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Eliminar</button>
-                        </div>
-                    </div>
-                `;
+            <div class="vault-item">
+                <div class="item-info">
+                    <strong>${escapeHtml(item.site)}</strong>
+                    <div>Usuario: ${escapeHtml(item.username)}</div>
+                    <div>Contraseña: <span class="password-display">${escapeHtml(item.password)}</span></div>
+                </div>
+                <div class="actions">
+                    <button class="btn-success" onclick="copyToClipboard('${escapeQuotes(item.password)}')" style="padding: 6px 10px; font-size: 0.8rem;">Copiar</button>
+                    <button class="btn-secondary" onclick="editItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Editar</button>
+                    <button class="btn-danger" onclick="deleteItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Eliminar</button>
+                </div>
+            </div>
+        `;
     });
     vaultList.innerHTML = html;
 }
 
-// Guardar o actualizar credencial
 document.getElementById('vaultForm').addEventListener('submit', async function (e) {
     e.preventDefault();
 
@@ -263,7 +278,6 @@ document.getElementById('vaultForm').addEventListener('submit', async function (
     const password = document.getElementById('password').value;
     const editIndex = parseInt(document.getElementById('editIndex').value);
 
-    // Cifrar individualmente cada campo
     const encSite = await encryptData(site);
     const encUser = await encryptData(username);
     const encPass = await encryptData(password);
@@ -276,12 +290,10 @@ document.getElementById('vaultForm').addEventListener('submit', async function (
     };
 
     try {
-        // Cargar todo el vault cifrado actual del proveedor activo
         const rawPayload = await storageService.loadData();
         let encryptedVault = JSON.parse(rawPayload) || [];
 
         if (editIndex >= 0) {
-            // Buscar por ID para actualizar de forma segura
             const targetId = vaultCache[editIndex].id;
             const pos = encryptedVault.findIndex(i => i.id === targetId);
             if (pos >= 0) encryptedVault[pos] = entry;
@@ -289,13 +301,11 @@ document.getElementById('vaultForm').addEventListener('submit', async function (
             encryptedVault.push(entry);
         }
 
-        // Guardar a través del servicio inyectado
         await storageService.saveData(JSON.stringify(encryptedVault));
-
         resetForm();
         loadVault();
     } catch (err) {
-        alert("Error al guardar en el almacenamiento: " + err.message);
+        alert("Error al guardar: " + err.message);
     }
 });
 
@@ -339,16 +349,15 @@ function resetForm() {
 async function syncStorage() {
     try {
         await loadVault();
-        alert("Sincronizado correctamente con " + storageService.getName());
+        alert("Sincronizado correctamente.");
     } catch (e) {
         alert("Error de sincronización: " + e.message);
     }
 }
 
 // ==========================================
-// 4. UTILIDADES Y SEGURIDAD ADICIONAL
+// 4. UTILIDADES Y SEGURIDAD
 // ==========================================
-
 function generatePassword() {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*!_-+=.";
     let password = "";
@@ -365,18 +374,11 @@ function togglePass() {
     passInput.type = passInput.type === 'password' ? 'text' : 'password';
 }
 
-function copyTextToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        // Auto-limpieza de portapapeles a los 30 segundos por seguridad
-        setTimeout(() => {
-            navigator.clipboard.writeText("").catch(() => { });
-        }, 30000);
-    });
-}
-
 function copyToClipboard(text) {
-    copyTextToClipboard(text);
-    alert("¡Contraseña copiada al portapapeles! Se limpiará automáticamente en 30 segundos.");
+    navigator.clipboard.writeText(text).then(() => {
+        setTimeout(() => { navigator.clipboard.writeText("").catch(() => { }); }, 30000);
+    });
+    alert("¡Contraseña copiada! Se limpiará en 30 segundos.");
 }
 
 function filterVault() {
@@ -413,7 +415,7 @@ function initIdleTimer() {
         if (timeLeft <= 0) {
             clearInterval(idleTimer);
             lockVault();
-            alert("Vault bloqueado automáticamente por inactividad.");
+            alert("Vault bloqueado por inactividad.");
         }
     }, 1000);
 }
@@ -422,5 +424,5 @@ function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 function escapeQuotes(str) {
-    return str.replace(apostrophe => "\'");
+    return str.replace(/'/g, "\\'");
 }
