@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniVault Pro - Gestor de Contraseñas Seguro</title>
+    <style>
+        :root {
+            --primary: #175ddc;
+            --primary-hover: #10439f;
+            --bg: #f4f6f9;
+            --card-bg: #ffffff;
+            --text: #333333;
+            --border: #dcdcdc;
+            --danger: #dc3545;
+            --danger-hover: #bd2130;
+            --success: #28a745;
+            --warning: #ffc107;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 750px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        header h1 {
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            font-size: 1.2rem;
+            margin-top: 0;
+            color: #444;
+            border-bottom: 2px solid var(--bg);
+            padding-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+
+        .btn-danger {
+            background-color: var(--danger);
+        }
+
+        .btn-danger:hover {
+            background-color: var(--danger-hover);
+        }
+
+        .btn-success {
+            background-color: var(--success);
+        }
+
+        .btn-success:hover {
+            background-color: #218838;
+        }
+
+        .vault-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--bg);
+        }
+
+        .vault-item:last-child {
+            border-bottom: none;
+        }
+
+        .item-info div {
+            font-size: 0.85rem;
+            color: #666;
+        }
+
+        .item-info strong {
+            font-size: 1.05rem;
+            color: var(--text);
+        }
+
+        .password-display {
+            font-family: monospace;
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .sync-config {
+            background: #f8fafc;
+            border: 1px dashed var(--border);
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <header>
+            <h1>MiniVault Pro</h1>
+            <p>Gestor de Contraseñas Seguro (Arquitectura S.O.L.I.D. + AES-256)</p>
+        </header>
+
+        <!-- Pantalla de Desbloqueo / Configuración Inicial -->
+        <div id="authCard" class="card">
+            <h2>Desbloquear Vault</h2>
+            <p style="font-size: 0.85rem; color: #666;">Ingresa tu contraseña maestra para descifrar tus datos locales o
+                remotos.</p>
+            <div class="form-group">
+                <label for="masterPassword">Contraseña Maestra</label>
+                <input type="password" id="masterPassword" placeholder="••••••••">
+            </div>
+
+            <!-- Selector de Storage (Principio D de SOLID) -->
+            <div class="sync-config">
+                <label for="storageProviderSelect">Proveedor de Almacenamiento (IStorageService):</label>
+                <select id="storageProviderSelect" onchange="toggleStorageConfig()">
+                    <option value="local">LocalStorage (Navegador)</option>
+                    <option value="github">GitHub JSON Gist / Repo (Remoto)</option>
+                </select>
+
+                <div id="githubConfigSection" class="hidden" style="margin-top: 10px;">
+                    <div class="form-group">
+                        <label for="ghToken">GitHub Personal Access Token (PAT)</label>
+                        <input type="password" id="ghToken" placeholder="ghp_xxxxxxxxxxxx">
+                    </div>
+                    <div class="form-group">
+                        <label for="ghRepo">Repositorio (ej. usuario/repo o Gist ID)</label>
+                        <input type="text" id="ghRepo" placeholder="tu-usuario/passwords-db">
+                    </div>
+                    <div class="form-group">
+                        <label for="ghPath">Ruta del archivo JSON</label>
+                        <input type="text" id="ghPath" value="vault.json">
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" onclick="unlockVault()">Desbloquear Vault</button>
+        </div>
+
+        <!-- Panel Principal (Oculto hasta desbloquear) -->
+        <div id="mainPanel" class="hidden">
+
+            <!-- Barra superior de control -->
+            <div class="card"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;">
+                <div>
+                    <span class="status-badge" id="storageStatusBadge">Almacenamiento: Local</span>
+                    <span class="status-badge" id="lockTimerBadge"
+                        style="background: #dbeafe; color: #1e40af;">Inactividad: 5:00</span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn-secondary" onclick="syncStorage()"
+                        style="padding: 6px 12px; font-size: 0.85rem;">Sincronizar</button>
+                    <button class="btn-danger" onclick="lockVault()"
+                        style="padding: 6px 12px; font-size: 0.85rem;">Bloquear</button>
+                </div>
+            </div>
+
+            <!-- Generador de Contraseñas -->
+            <div class="card">
+                <h2>Generador de Contraseñas Seguras</h2>
+                <div class="form-group row">
+                    <input type="text" id="generatedPassword" readonly placeholder="Genera una contraseña...">
+                    <button type="button" onclick="generatePassword()" style="width: 140px;">Generar</button>
+                </div>
+            </div>
+
+            <!-- Formulario para Guardar / Editar -->
+            <div class="card">
+                <h2 id="formTitle">Guardar Nueva Credencial</h2>
+                <form id="vaultForm">
+                    <input type="hidden" id="editIndex" value="-1">
+                    <div class="form-group">
+                        <label for="site">Sitio Web / Aplicación</label>
+                        <input type="text" id="site" required placeholder="ej. github.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="username">Usuario / Correo</label>
+                        <input type="text" id="username" required placeholder="ej. usuario@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Contraseña</label>
+                        <div class="row">
+                            <input type="password" id="password" required placeholder="••••••••">
+                            <button type="button" class="btn-secondary" onclick="togglePass()"
+                                style="width: 100px;">Ver</button>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <button type="submit" id="submitBtn">Guardar Credencial</button>
+                        <button type="button" id="cancelEditBtn" class="btn-secondary hidden"
+                            onclick="resetForm()">Cancelar</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Listado del Vault y Buscador -->
+            <div class="card">
+                <h2>
+                    <span>Cuentas Guardadas</span>
+                    <input type="text" id="searchInput" placeholder="Buscar por sitio o usuario..."
+                        oninput="filterVault()" style="width: 250px; font-size: 0.9rem; padding: 6px 10px;">
+                </h2>
+                <div id="vaultList">
+                    <p style="color: #777; text-align: center;">No hay contraseñas guardadas.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 1. CAPA DE ABSTRACCIÓN DE ALMACENAMIENTO (SOLID: D - Dependency Inversion)
+        // ==========================================
+
+        // Interfaz conceptual IStorageService:
+        // loadData() -> Promise<string>
+        // saveData(dataString) -> Promise<void>
+
+        class LocalStorageProvider {
+            async loadData() {
+                return localStorage.getItem('my_secure_vault_payload') || '[]';
+            }
+            async saveData(dataString) {
+                localStorage.setItem('my_secure_vault_payload', dataString);
+            }
+            getName() { return "LocalStorage"; }
+        }
+
+        class GitHubJsonStorageProvider {
+            constructor(token, repo, path) {
+                this.token = token;
+                this.repo = repo; // formato "usuario/repo"
+                this.path = path || "vault.json";
+            }
+
+            async loadData() {
+                const url = `https://api.github.com/repos/${this.repo}/contents/${this.path}`;
+                const response = await fetch(url, {
+                    headers: { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
+                });
+                if (response.status === 404) return '[]'; // Si no existe aún
+                if (!response.ok) throw new Error("Error al conectar con GitHub API");
+
+                const data = await response.json();
+                // GitHub devuelve el contenido en base64
+                const jsonString = decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
+                return jsonString;
+            }
+
+            async saveData(dataString) {
+                const url = `https://api.github.com/repos/${this.repo}/contents/${this.path}`;
+
+                // 1. Necesitamos obtener el SHA actual del archivo si existe (requisito de GitHub API para actualizar)
+                let sha = null;
+                try {
+                    const checkRes = await fetch(url, {
+                        headers: { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
+                    });
+                    if (checkRes.ok) {
+                        const fileData = await checkRes.json();
+                        sha = fileData.sha;
+                    }
+                } catch (e) { /* Archivo nuevo */ }
+
+                // 2. Codificar contenido en base64 UTF-8 seguro
+                const encodedContent = btoa(unescape(encodeURIComponent(dataString)));
+
+                const body = {
+                    message: "Update password vault encrypted payload via MiniVault Pro",
+                    content: encodedContent
+                };
+                if (sha) body.sha = sha;
+
+                const putRes = await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${this.token}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/vnd.github.v3+json'
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                if (!putRes.ok) {
+                    const errDetails = await putRes.json();
+                    throw new Error("GitHub Save Error: " + (errDetails.message || putRes.statusText));
+                }
+            }
+            getName() { return "GitHub JSON"; }
+        }
+
+        // ==========================================
+        // 2. ESTADO GLOBAL Y CRIPTOGRAFÍA AES-256
+        // ==========================================
+        let storageService = null; // Inyección de dependencia
+        let cryptoKey = null;
+        let salt = null;
+        let vaultCache = [];
+        let idleTimer = null;
+        const IDLE_LIMIT_MS = 5 * 60 * 1000; // 5 minutos de inactividad
+
+        function str2ab(str) { return new TextEncoder().encode(str); }
+        function ab2str(buffer) { return new TextDecoder().decode(buffer); }
+        function ab2b64(buf) {
+            let binary = '';
+            let bytes = new Uint8Array(buf);
+            for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+            return btoa(binary);
+        }
+        function b642ab(base64) {
+            let binary = atob(base64);
+            let bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            return bytes.buffer;
+        }
+
+        function toggleStorageConfig() {
+            const provider = document.getElementById('storageProviderSelect').value;
+            const ghSection = document.getElementById('githubConfigSection');
+            if (provider === 'github') {
+                ghSection.classList.remove('hidden');
+            } else {
+                ghSection.classList.add('hidden');
+            }
+        }
+
+        async function unlockVault() {
+            const masterPass = document.getElementById('masterPassword').value;
+            if (!masterPass) {
+                alert("Por favor ingresa una contraseña maestra.");
+                return;
+            }
+
+            // Seleccionar proveedor según la elección (Principio D / Inyección)
+            const providerType = document.getElementById('storageProviderSelect').value;
+            if (providerType === 'github') {
+                const token = document.getElementById('ghToken').value;
+                const repo = document.getElementById('ghRepo').value;
+                const path = document.getElementById('ghPath').value;
+                if (!token || !repo) {
+                    alert("Para usar GitHub necesitas ingresar tu Token y el Repositorio.");
+                    return;
+                }
+                storageService = new GitHubJsonStorageProvider(token, repo, path);
+            } else {
+                storageService = new LocalStorageProvider();
+            }
+
+            try {
+                // Gestionar Salt de forma segura (para LocalStorage o guardada localmente)
+                let storedSaltKey = 'vault_salt_' + providerType;
+                let storedSalt = localStorage.getItem(storedSaltKey);
+
+                if (!storedSalt) {
+                    salt = window.crypto.getRandomValues(new Uint8Array(16));
+                    localStorage.setItem(storedSaltKey, ab2b64(salt));
+                } else {
+                    salt = new Uint8Array(b642ab(storedSalt));
+                }
+
+                // Derivar clave criptográfica con PBKDF2 (100,000 iteraciones)
+                const baseKey = await window.crypto.subtle.importKey(
+                    "raw", str2ab(masterPass), { name: "PBKDF2" }, false, ["deriveKey"]
+                );
+
+                cryptoKey = await window.crypto.subtle.deriveKey(
+                    { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+                    baseKey,
+                    { name: "AES-GCM", length: 256 },
+                    false,
+                    ["encrypt", "decrypt"]
+                );
+
+                // Intentar cargar y verificar descifrado
+                document.getElementById('authCard').classList.add('hidden');
+                document.getElementById('mainPanel').classList.remove('hidden');
+                document.getElementById('storageStatusBadge').innerText = "Almacenamiento: " + storageService.getName();
+
+                await loadVault();
+                initIdleTimer();
+            } catch (e) {
+                alert("Error al desbloquear el vault o conectar con el proveedor: " + e.message);
+                console.error(e);
+                document.getElementById('authCard').classList.remove('hidden');
+                document.getElementById('mainPanel').classList.add('hidden');
+            }
+        }
+
+        async function encryptData(plainText) {
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const encrypted = await window.crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv }, cryptoKey, str2ab(plainText)
+            );
+            return { iv: ab2b64(iv), data: ab2b64(encrypted) };
+        }
+
+        async function decryptData(encryptedObj) {
+            try {
+                const iv = new Uint8Array(b642ab(encryptedObj.iv));
+                const data = b642ab(encryptedObj.data);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: iv }, cryptoKey, data
+                );
+                return ab2str(decrypted);
+            } catch (e) {
+                return "[Error de descifrado]";
+            }
+        }
+
+        // ==========================================
+        // 3. GESTIÓN DE CREDENCIALES (CRUD)
+        // ==========================================
+
+        async function loadVault() {
+            const vaultList = document.getElementById('vaultList');
+            vaultList.innerHTML = '<p style="color: #777; text-align: center;">Cargando y descifrando vault...</p>';
+
+            try {
+                const rawPayload = await storageService.loadData();
+                const encryptedVault = JSON.parse(rawPayload) || [];
+
+                vaultCache = [];
+                for (const item of encryptedVault) {
+                    const decSite = await decryptData(item.site);
+                    const decUser = await decryptData(item.username);
+                    const decPass = await decryptData(item.password);
+                    vaultCache.push({
+                        id: item.id,
+                        site: decSite,
+                        username: decUser,
+                        password: decPass
+                    });
+                }
+                renderVaultList(vaultCache);
+            } catch (e) {
+                vaultList.innerHTML = '<p style="color: red; text-align: center;">Error al cargar datos: ' + e.message + '</p>';
+            }
+        }
+
+        function renderVaultList(items) {
+            const vaultList = document.getElementById('vaultList');
+            if (items.length === 0) {
+                vaultList.innerHTML = '<p style="color: #777; text-align: center;">No hay contraseñas guardadas.</p>';
+                return;
+            }
+
+            let html = '';
+            items.forEach((item, index) => {
+                html += `
+                    <div class="vault-item">
+                        <div class="item-info">
+                            <strong>${escapeHtml(item.site)}</strong>
+                            <div>Usuario: ${escapeHtml(item.username)}</div>
+                            <div>Contraseña: <span class="password-display">${escapeHtml(item.password)}</span></div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn-success" onclick="copyToClipboard('${escapeQuotes(item.password)}')" style="padding: 6px 10px; font-size: 0.8rem;">Copiar</button>
+                            <button class="btn-secondary" onclick="editItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Editar</button>
+                            <button class="btn-danger" onclick="deleteItem(${index})" style="padding: 6px 10px; font-size: 0.8rem;">Eliminar</button>
+                        </div>
+                    </div>
+                `;
+            });
+            vaultList.innerHTML = html;
+        }
+
+        // Guardar o actualizar credencial
+        document.getElementById('vaultForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const site = document.getElementById('site').value;
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const editIndex = parseInt(document.getElementById('editIndex').value);
+
+            // Cifrar individualmente cada campo
+            const encSite = await encryptData(site);
+            const encUser = await encryptData(username);
+            const encPass = await encryptData(password);
+
+            const entry = {
+                id: editIndex >= 0 ? vaultCache[editIndex].id : Date.now(),
+                site: encSite,
+                username: encUser,
+                password: encPass
+            };
+
+            try {
+                // Cargar todo el vault cifrado actual del proveedor activo
+                const rawPayload = await storageService.loadData();
+                let encryptedVault = JSON.parse(rawPayload) || [];
+
+                if (editIndex >= 0) {
+                    // Buscar por ID para actualizar de forma segura
+                    const targetId = vaultCache[editIndex].id;
+                    const pos = encryptedVault.findIndex(i => i.id === targetId);
+                    if (pos >= 0) encryptedVault[pos] = entry;
+                } else {
+                    encryptedVault.push(entry);
+                }
+
+                // Guardar a través del servicio inyectado
+                await storageService.saveData(JSON.stringify(encryptedVault));
+
+                resetForm();
+                loadVault();
+            } catch (err) {
+                alert("Error al guardar en el almacenamiento: " + err.message);
+            }
+        });
+
+        async function deleteItem(cacheIndex) {
+            if (!confirm("¿Estás seguro de eliminar esta credencial?")) return;
+            const targetId = vaultCache[cacheIndex].id;
+
+            try {
+                const rawPayload = await storageService.loadData();
+                let encryptedVault = JSON.parse(rawPayload) || [];
+                encryptedVault = encryptedVault.filter(i => i.id !== targetId);
+
+                await storageService.saveData(JSON.stringify(encryptedVault));
+                loadVault();
+            } catch (err) {
+                alert("Error al eliminar: " + err.message);
+            }
+        }
+
+        function editItem(cacheIndex) {
+            const item = vaultCache[cacheIndex];
+            document.getElementById('site').value = item.site;
+            document.getElementById('username').value = item.username;
+            document.getElementById('password').value = item.password;
+            document.getElementById('editIndex').value = cacheIndex;
+
+            document.getElementById('formTitle').innerText = "Editar Credencial";
+            document.getElementById('submitBtn').innerText = "Actualizar Credencial";
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function resetForm() {
+            document.getElementById('vaultForm').reset();
+            document.getElementById('editIndex').value = "-1";
+            document.getElementById('formTitle').innerText = "Guardar Nueva Credencial";
+            document.getElementById('submitBtn').innerText = "Guardar Credencial";
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+        }
+
+        async function syncStorage() {
+            try {
+                await loadVault();
+                alert("Sincronizado correctamente con " + storageService.getName());
+            } catch (e) {
+                alert("Error de sincronización: " + e.message);
+            }
+        }
+
+        // ==========================================
+        // 4. UTILIDADES Y SEGURIDAD ADICIONAL
+        // ==========================================
+
+        function generatePassword() {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*!_-+=.";
+            let password = "";
+            for (let i = 0; i < 16; i++) {
+                password += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.getElementById('generatedPassword').value = password;
+            document.getElementById('password').value = password;
+            document.getElementById('password').type = 'text';
+        }
+
+        function togglePass() {
+            const passInput = document.getElementById('password');
+            passInput.type = passInput.type === 'password' ? 'text' : 'password';
+        }
+
+        function copyTextToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Auto-limpieza de portapapeles a los 30 segundos por seguridad
+                setTimeout(() => {
+                    navigator.clipboard.writeText("").catch(() => { });
+                }, 30000);
+            });
+        }
+
+        function copyToClipboard(text) {
+            copyTextToClipboard(text);
+            alert("¡Contraseña copiada al portapapeles! Se limpiará automáticamente en 30 segundos.");
+        }
+
+        function filterVault() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = vaultCache.filter(item =>
+                item.site.toLowerCase().includes(query) || item.username.toLowerCase().includes(query)
+            );
+            renderVaultList(filtered);
+        }
+
+        function lockVault() {
+            cryptoKey = null;
+            vaultCache = [];
+            document.getElementById('mainPanel').classList.add('hidden');
+            document.getElementById('authCard').classList.remove('hidden');
+            document.getElementById('masterPassword').value = '';
+            if (idleTimer) clearInterval(idleTimer);
+        }
+
+        function initIdleTimer() {
+            let timeLeft = IDLE_LIMIT_MS;
+            if (idleTimer) clearInterval(idleTimer);
+
+            const resetTimer = () => { timeLeft = IDLE_LIMIT_MS; };
+            window.addEventListener('mousemove', resetTimer);
+            window.addEventListener('keypress', resetTimer);
+
+            idleTimer = setInterval(() => {
+                timeLeft -= 1000;
+                const minutes = Math.floor(timeLeft / 60000);
+                const seconds = Math.floor((timeLeft % 60000) / 1000);
+                document.getElementById('lockTimerBadge').innerText = `Inactividad: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+
+                if (timeLeft <= 0) {
+                    clearInterval(idleTimer);
+                    lockVault();
+                    alert("Vault bloqueado automáticamente por inactividad.");
+                }
+            }, 1000);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+        function escapeQuotes(str) {
+            return str.replace(apostrophe => "\'");
+        }
+    </script>
+</body>
+
+</html>
