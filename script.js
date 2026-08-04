@@ -69,17 +69,14 @@ class GitHubJsonStorageProvider {
 }
 
 // ==========================================
-// 2. ESTADO GLOBAL Y CRIPTOGRAFÍA
+// 2. GESTIÓN DE CONFIGURACIÓN Y CRIPTOGRAFÍA (CONFIG.JSON)
 // ==========================================
+const STATIC_SALT_STRING = "minivault-static-salt-yalucepadi-kasd";
 let storageService = null;
 let cryptoKey = null;
-let salt = null;
 let vaultCache = [];
 let idleTimer = null;
 const IDLE_LIMIT_MS = 5 * 60 * 1000;
-
-const VERIFICATION_SENTINEL_SITE = "minivault_verification_sentinel_key";
-const VERIFICATION_PLAINTEXT = "VALID_MASTER_PASSWORD";
 
 function str2ab(str) { return new TextEncoder().encode(str); }
 function ab2str(buffer) { return new TextDecoder().decode(buffer); }
@@ -94,6 +91,81 @@ function b642ab(base64) {
     let bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes.buffer;
+}
+
+// Función auxiliar para calcular SHA-256 de la contraseña maestra
+async function calculateMasterHash(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password + STATIC_SALT_STRING);
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Proveedor auxiliar específico para manejar config.json en GitHub o LocalStorage
+class ConfigStorageHelper {
+    constructor(providerType, storageInstance, token, repo) {
+        this.providerType = providerType;
+        this.storageInstance = storageInstance;
+        this.token = token;
+        this.repo = repo;
+    }
+
+    async getConfig() {
+        if (this.providerType === 'github') {
+            const url = `https://api.github.com/repos/${this.repo}/contents/config.json`;
+            try {
+                const res = await fetch(url, {
+                    headers: { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
+                });
+                if (res.status === 404) return null;
+                if (!res.ok) return null;
+                const data = await res.json();
+                const decoded = decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
+                return JSON.parse(decoded);
+            } catch (e) {
+                return null;
+            }
+        } else {
+            const val = localStorage.getItem('minivault_config');
+            return val ? JSON.parse(val) : null;
+        }
+    }
+
+    async saveConfig(configData) {
+        const jsonStr = JSON.stringify(configData, null, 2);
+        if (this.providerType === 'github') {
+            const url = `https://api.github.com/repos/${this.repo}/contents/config.json`;
+            let sha = null;
+            try {
+                const checkRes = await fetch(url, {
+                    headers: { 'Authorization': `token ${this.token}`, 'Accept': 'application/vnd.github.v3+json' }
+                });
+                if (checkRes.ok) {
+                    const fileData = await checkRes.json();
+                    sha = fileData.sha;
+                }
+            } catch (e) { }
+
+            const body = {
+                message: "Initialize config.json via MiniVault Pro",
+                content: btoa(unescape(encodeURIComponent(jsonStr)))
+            };
+            if (sha) body.sha = sha;
+
+            await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': `token ${this.token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/vnd.github.v3+json'
+                },
+                body: JSON.stringify(body)
+            });
+        } else {
+            localStorage.setItem('minivault_config', jsonStr);
+        }
+    }
 }
 
 function toggleStorageConfig() {
@@ -114,10 +186,12 @@ async function unlockVault() {
     }
 
     const providerType = document.getElementById('storageProviderSelect').value;
+    let token, repo, path;
+
     if (providerType === 'github') {
-        const token = document.getElementById('ghToken').value;
-        const repo = document.getElementById('ghRepo').value;
-        const path = document.getElementById('ghPath').value;
+        token = document.getElementById('ghToken').value;
+        repo = document.getElementById('ghRepo').value;
+        path = document.getElementById('ghPath').value || "vault.json";
         if (!token || !repo) {
             alert("Para usar GitHub necesitas ingresar tu Token y el Repositorio.");
             return;
@@ -128,56 +202,40 @@ async function unlockVault() {
     }
 
     try {
-        let storedSaltKey = 'vault_salt_' + providerType;
-        let storedSalt = localStorage.getItem(storedSaltKey);
+        const configHelper = new ConfigStorageHelper(providerType, storageService, token, repo);
+        let config = await configHelper.getConfig();
+        const currentHash = await calculateMasterHash(masterPass);
 
-        if (!storedSalt) {
-            salt = window.crypto.getRandomValues(new Uint8Array(16));
-            localStorage.setItem(storedSaltKey, ab2b64(salt));
+        if (!config) {
+            // PRIMER USO: Crear config.json automáticamente
+            const newConfig = {
+                version: "2.0",
+                salt: STATIC_SALT_STRING,
+                masterHash: currentHash
+            };
+            await configHelper.saveConfig(newConfig);
+            config = newConfig;
         } else {
-            salt = new Uint8Array(b642ab(storedSalt));
+            // VALIDACIÓN: Comprobar el hash maestro
+            if (config.masterHash !== currentHash) {
+                alert("Contraseña maestra incorrecta.");
+                return;
+            }
         }
 
+        // Derivar la llave AES-GCM con la sal estática compartida
+        const saltBuffer = str2ab(config.salt || STATIC_SALT_STRING);
         const baseKey = await window.crypto.subtle.importKey(
             "raw", str2ab(masterPass), { name: "PBKDF2" }, false, ["deriveKey"]
         );
 
         cryptoKey = await window.crypto.subtle.deriveKey(
-            { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+            { name: "PBKDF2", salt: saltBuffer, iterations: 100000, hash: "SHA-256" },
             baseKey,
             { name: "AES-GCM", length: 256 },
             false,
             ["encrypt", "decrypt"]
         );
-
-        // Cargar y validar testigo
-        const rawPayload = await storageService.loadData();
-        let encryptedVault = JSON.parse(rawPayload) || [];
-        let sentinelIndex = encryptedVault.findIndex(i => i.isSentinel === true);
-
-        if (sentinelIndex === -1) {
-            const encSentinelSite = await encryptData(VERIFICATION_SENTINEL_SITE);
-            const encSentinelUser = await encryptData("system");
-            const encSentinelPass = await encryptData(VERIFICATION_PLAINTEXT);
-
-            encryptedVault.push({
-                id: 'sentinel_' + Date.now(),
-                isSentinel: true,
-                site: encSentinelSite,
-                username: encSentinelUser,
-                password: encSentinelPass
-            });
-            await storageService.saveData(JSON.stringify(encryptedVault));
-        } else {
-            const sentinelItem = encryptedVault[sentinelIndex];
-            const decryptedPass = await decryptData(sentinelItem.password);
-
-            if (decryptedPass !== VERIFICATION_PLAINTEXT) {
-                cryptoKey = null;
-                alert("Contraseña maestra incorrecta.");
-                return;
-            }
-        }
 
         document.getElementById('authCard').classList.add('hidden');
         document.getElementById('mainPanel').classList.remove('hidden');
@@ -225,8 +283,7 @@ async function loadVault() {
 
         vaultCache = [];
         for (const item of encryptedVault) {
-            if (item.isSentinel) continue;
-
+            // Ya no existen centinelas falsos, se leen directo
             const decSite = await decryptData(item.site);
             const decUser = await decryptData(item.username);
             const decPass = await decryptData(item.password);
